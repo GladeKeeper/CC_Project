@@ -1,6 +1,9 @@
 import os
 import warnings
+from datetime import datetime
+
 import numpy as np
+import matplotlib.pyplot as plt
 import tensorflow as tf
 from keras import Sequential
 from keras.callbacks import EarlyStopping
@@ -18,13 +21,13 @@ warnings.filterwarnings('ignore')
 NUM_SAMPLES = 5
 
 
-def load_data(input_dir, output_dir="output", data_size=-1):
+def load_data(_input_dir, _output_dir="output", _data_size=-1):
     """
-    :param input_dir: input directory name
+    :param _input_dir: input directory name
                       AWS S3 directory name, where the input files are stored
-    :param output_dir: output directory name
+    :param _output_dir: output directory name
                       AWS S3 directory name, where the output files are saved
-    :param data_size: size of data
+    :param _data_size: size of data
                       Data size, that needs to be tested, by default it takes value of
                       -1, which means consider all the data
     :return:
@@ -38,55 +41,55 @@ def load_data(input_dir, output_dir="output", data_size=-1):
     # to obtain the zip-codes for latitude, longitude values
     engine = SearchEngine()
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    if not os.path.exists(_output_dir):
+        os.makedirs(_output_dir)
 
     # load all the data
     months = ["apr", "may", "jun", "jul", "aug", "sep"]
     file_format = "uber-raw-data-{}14.csv"
-    df = DataFrame()
+    _data = DataFrame()
     for month in months:
-        file_name = input_dir + "/" + file_format.format(month)
+        file_name = _input_dir + "/" + file_format.format(month)
         df_sub = pd.read_csv(file_name)
-        df = df.append(df_sub)
+        _data = _data.append(df_sub)
 
     # sample the data
-    if data_size > 0:
-        df = df.sample(n=data_size)
+    if _data_size > 0:
+        _data = _data.sample(n=_data_size)
 
     # process date and time
-    df['Date/Time'] = pd.to_datetime(df['Date/Time'], format='%m/%d/%Y %H:%M:%S')
-    df['month'] = df['Date/Time'].dt.month
-    df['weekday'] = df['Date/Time'].dt.dayofweek
-    df['day'] = df['Date/Time'].dt.day
-    df['hour'] = df['Date/Time'].dt.hour
-    df['minute'] = df['Date/Time'].dt.minute
-    df['lat_short'] = round(df['Lat'], 2)
-    df['lon_short'] = round(df['Lon'], 2)
+    _data['Date/Time'] = pd.to_datetime(_data['Date/Time'], format='%m/%d/%Y %H:%M:%S')
+    _data['month'] = _data['Date/Time'].dt.month
+    _data['weekday'] = _data['Date/Time'].dt.dayofweek
+    _data['day'] = _data['Date/Time'].dt.day
+    _data['hour'] = _data['Date/Time'].dt.hour
+    _data['minute'] = _data['Date/Time'].dt.minute
+    _data['lat_short'] = round(_data['Lat'], 2)
+    _data['lon_short'] = round(_data['Lon'], 2)
 
     # obtaining the zip-codes
-    df['zip'] = df.apply(
+    _data['zip'] = _data.apply(
         lambda row: engine.by_coordinates(row['Lat'], row['Lon'], radius=10)[0].zipcode, axis=1
     )
 
     # summarizing demand data
-    demand = (df.groupby(['zip']).count()['Date/Time']).reset_index()
-    demand.columns = ['Zip', 'Number of Trips']
-    demand.to_csv(output_dir + "/demand.csv", index=False)
+    _demand = (_data.groupby(['zip']).count()['Date/Time']).reset_index()
+    _demand.columns = ['Zip', 'Number of Trips']
+    _demand.to_csv(_output_dir + "/demand.csv", index=False)
 
-    demand_w = (df.groupby(['zip', 'weekday']).count()['Date/Time']).reset_index()
-    demand_w.columns = ['Zip', 'Weekday', 'Number of Trips']
-    demand_w.to_csv(output_dir + "/demand_dow.csv", index=False)
+    _demand_w = (_data.groupby(['zip', 'weekday']).count()['Date/Time']).reset_index()
+    _demand_w.columns = ['Zip', 'Weekday', 'Number of Trips']
+    _demand_w.to_csv(_output_dir + "/demand_dow.csv", index=False)
 
-    demand_h = (df.groupby(['zip', 'hour']).count()['Date/Time']).reset_index()
-    demand_h.columns = ['Zip', 'Hour', 'Number of Trips']
-    demand_h.to_csv(output_dir + "/demand_h.csv", index=False)
+    _demand_h = (_data.groupby(['zip', 'hour']).count()['Date/Time']).reset_index()
+    _demand_h.columns = ['Zip', 'Hour', 'Number of Trips']
+    _demand_h.to_csv(_output_dir + "/demand_h.csv", index=False)
 
-    demand_wh = (df.groupby(['zip', 'weekday', 'hour']).count()['Date/Time']).reset_index()
-    demand_wh.columns = ['Zip', 'Weekday', 'Hour', 'Number of Trips']
-    demand_wh.to_csv(output_dir + "/demand_h_dow.csv", index=False)
+    _demand_wh = (_data.groupby(['zip', 'weekday', 'hour']).count()['Date/Time']).reset_index()
+    _demand_wh.columns = ['Zip', 'Weekday', 'Hour', 'Number of Trips']
+    _demand_wh.to_csv(_output_dir + "/demand_h_dow.csv", index=False)
 
-    return df, demand, demand_w, demand_h, demand_wh
+    return _data, _demand, _demand_w, _demand_h, _demand_wh
 
 
 class DemandPredictorBase(object):
@@ -94,9 +97,10 @@ class DemandPredictorBase(object):
         Base class for demand predictor
     """
 
-    def __init__(self, _x, _y, train=True):
+    def __init__(self, _x, _y, train=True, output_dir="."):
         self.x = _x
         self.y = _y
+        self.output_dir = output_dir
         self.model = self.build_model()
         if train:
             self.train()
@@ -141,7 +145,7 @@ class DemandPredictorBase(object):
 
 
 class DemandPredictorNN(DemandPredictorBase):
-    def __init__(self, _x, _y, train=True):
+    def __init__(self, _x, _y, train=True, output_dir="."):
         self.input_shape = len(_x[0])
         self.output_shape = len(_y[0])
         self.epochs = 4000
@@ -150,7 +154,7 @@ class DemandPredictorNN(DemandPredictorBase):
         self.validation_split = 0.2
         self.learning_rate = 0.01
         self.history = None
-        super(DemandPredictorNN, self).__init__(_x, _y, train)
+        super(DemandPredictorNN, self).__init__(_x, _y, train, output_dir)
 
     def build_model(self):
         """
@@ -166,8 +170,8 @@ class DemandPredictorNN(DemandPredictorBase):
         return model
 
     def predict(self, _x_test):
-        if os.path.exists("best_model.h5"):
-            self.model = load_model("best_model.h5")
+        if os.path.exists(self.output_dir + "/best_model.h5"):
+            self.model = load_model(self.output_dir + "/best_model.h5")
         return super(DemandPredictorNN, self).predict(_x_test)
 
     def train(self):
@@ -175,7 +179,10 @@ class DemandPredictorNN(DemandPredictorBase):
             train the model
         """
         es = EarlyStopping(monitor='val_loss', mode='min', verbose=self.verbose, patience=1000)
-        mc = ModelCheckpoint('best_model.h5', monitor='val_loss', mode='min', verbose=self.verbose, save_best_only=True)
+        mc = ModelCheckpoint(
+            self.output_dir + '/best_model.h5', monitor='val_loss', mode='min',
+            verbose=self.verbose, save_best_only=True
+        )
         self.history = \
             self.model.fit(
                 self.x, self.y,
@@ -190,19 +197,18 @@ class DemandPredictorNN(DemandPredictorBase):
         Save the model based on input file name model_file_name given
         """
         model_json = self.model.to_json()
-        with open(f"{model_file_name}.json", "w") as json_file:
+        with open(f"{self.output_dir}/{model_file_name}.json", "w") as json_file:
             json_file.write(model_json)
-        self.model.save_weights(f"{model_file_name}.h5")
+        self.model.save_weights(f"{self.output_dir}/{model_file_name}.h5")
 
     def load(self, model_file_name):
-        with open(f"{model_file_name}", 'r') as json_file:
+        with open(f"{self.output_dir}/{model_file_name}", 'r') as json_file:
             loaded_model_json = json_file.read()
 
         self.model = model_from_json(loaded_model_json)
-        self.model.load_weights(f"{model_file_name}.h5")
+        self.model.load_weights(f"{self.output_dir}/{model_file_name}.h5")
 
     def plot(self, _i, _mse=None):
-        import matplotlib.pyplot as plt
         losses = self.history.history['loss']
         val_losses = self.history.history['val_loss']
         epochs = [i for i in range(len(losses))]
@@ -217,16 +223,16 @@ class DemandPredictorNN(DemandPredictorBase):
         plt.plot(epochs, losses)
         plt.legend(legend, loc="lower center", bbox_to_anchor=(0.5, 0.0))
         plt.title("Variation of Loss function over time")
-        plt.savefig(f'sample_{_i}.png')
+        plt.savefig(f'{_i}.png')
         plt.close()
 
 
 class DemandPredictorSVR(DemandPredictorBase):
-    def __init__(self, _x, _y, train=True):
+    def __init__(self, _x, _y, train=True, output_dir="."):
         self.kernel = 'rbf'
         self.gamma = 10
         self.c = 10
-        super(DemandPredictorSVR, self).__init__(_x, _y, train)
+        super(DemandPredictorSVR, self).__init__(_x, _y, train, output_dir)
 
     def build_model(self):
         """
@@ -267,83 +273,101 @@ def transform_data(_processed_data):
     return x, y, sc_x, sc_y
 
 
-def solve_using_neural_network(_processed_data):
+def solve_using_neural_network(_processed_data, _demand_key, _output_dir):
     """
     :param _processed_data: processed_data
+    :param _demand_key: demand data type
+    :param _output_dir: output directory
     :return: run NUM_SAMPLES time neural network and compute the average MSE and MSE ratio
     """
     _x, _y, _, _ = transform_data(_processed_data)
 
     mse = []
     mse_ratio = []
+    time_taken = []
 
     for _i in range(NUM_SAMPLES):
+        start = datetime.now()
         x_train, x_test, y_train, y_test = train_test_split(_x, _y, test_size=0.1, random_state=_i)
         tf.random.set_seed(_i)
-        nn = DemandPredictorNN(_x=x_train, _y=y_train)
+        nn = DemandPredictorNN(_x=x_train, _y=y_train, output_dir=_output_dir)
         y_pred = nn.predict(x_test)
         mse_val = nn.get_mse(y_test, y_pred)
-        nn.plot(f"sample_{_i}", mse_val)
+        nn.plot(f"{_output_dir}/demand_type_{_demand_key}_sample_id_{_i}", mse_val)
         mse.append(mse_val)
         mse_ratio.append(nn.get_mse_avg(y_test, y_pred))
+        time_taken.append((datetime.now() - start).total_seconds())
 
+    print(f"Average Time Taken: {np.mean(time_taken)} seconds")
     print(f"Average MSE: {np.mean(mse)}, Min MSE: {min(mse)}, Max MSE: {max(mse)}")
     print(f"Average MSE Ratio: {np.mean(mse_ratio)}, Min MSE Ratio: {min(mse_ratio)}, Max MSE Ratio: {max(mse_ratio)}")
 
 
-def solve_k_fold_neural_network(_processed_data):
+def solve_k_fold_neural_network(_processed_data, _demand_key, _output_dir):
     """
     :param _processed_data: processed_data
+    :param _demand_key: demand data type
+    :param _output_dir: output directory
     :return: run NUM_SAMPLES time neural network and compute the average MSE and MSE ratio
     """
     _x, _y, _, _ = transform_data(_processed_data)
     _i = 0
     mse = []
     mse_ratio = []
+    time_taken = []
     tf.random.set_seed(_i)
     kf = KFold(n_splits=10, random_state=1, shuffle=True)
     for _k, (train_idx, test_idx) in enumerate(kf.split(_x, _y)):
+        start = datetime.now()
         x_train, y_train = _x[train_idx], _y[train_idx]
         x_test, y_test = _x[test_idx], _y[test_idx]
-        nn = DemandPredictorNN(_x=x_train, _y=y_train)
+        nn = DemandPredictorNN(_x=x_train, _y=y_train, output_dir=_output_dir)
         y_pred = nn.predict(x_test)
         mse_val = nn.get_mse(y_test, y_pred)
-        nn.plot(f"sample_{_k}", mse_val)
+        nn.plot(f"{_output_dir}/demand_type_{_demand_key}_sample_id_{_k}", mse_val)
         mse.append(mse_val)
         mse_ratio.append(nn.get_mse_avg(y_test, y_pred))
+        time_taken.append((datetime.now() - start).total_seconds())
 
+    print(f"Average Time Taken: {np.mean(time_taken)} seconds")
     print(f"Average MSE: {np.mean(mse)}, Min MSE: {min(mse)}, Max MSE: {max(mse)}")
     print(f"Average MSE Ratio: {np.mean(mse_ratio)}, Min MSE Ratio: {min(mse_ratio)}, Max MSE Ratio: {max(mse_ratio)}")
 
 
-def solve_using_svr(_processed_data):
+def solve_using_svr(_processed_data, _demand_key, _output_dir):
     """
     :param _processed_data: processed_data
+    :param _demand_key: demand data type
+    :param _output_dir: output directory
     :return: run NUM_SAMPLES time neural network and compute the average MSE and MSE ratio
     """
     _x, _y, _, _ = transform_data(_processed_data)
 
     mse = []
     mse_ratio = []
+    time_taken = []
 
     for _i in range(NUM_SAMPLES):
+        start = datetime.now()
         x_train, x_test, y_train, y_test = train_test_split(_x, _y, test_size=0.1, random_state=_i)
-        svr = DemandPredictorSVR(x_train, y_train)
+        svr = DemandPredictorSVR(x_train, y_train, output_dir=_output_dir)
         y_pred = svr.predict(x_test)
         mse.append(svr.get_mse(y_test, y_pred))
         mse_ratio.append(svr.get_mse_avg(y_test, y_pred))
+        time_taken.append((datetime.now() - start).total_seconds())
 
+    print(f"Average Time Taken: {np.mean(time_taken)} seconds")
     print(f"Average MSE: {np.mean(mse)}, Min MSE: {min(mse)}, Max MSE: {max(mse)}")
     print(f"Average MSE Ratio: {np.mean(mse_ratio)}, Min MSE Ratio: {min(mse_ratio)}, Max MSE Ratio: {max(mse_ratio)}")
 
 
-_data, _demand, _demand_w, _demand_h, _demand_wh = load_data("data", data_size=100)
-_demand_data = {
-    "base": _demand, "weekday": _demand_w,
-    "hour": _demand_h, "weekday_n_hour": _demand_wh
+data, demand, demand_w, demand_h, demand_wh = load_data(_input_dir="data", _data_size=100, _output_dir="output")
+demand_data = {
+    "base": demand, "weekday": demand_w,
+    "hour": demand_h, "weekday_n_hour": demand_wh
 }
-for _demand_key in _demand_data:
-    _demand_datum = _demand_data[_demand_key]
-    print(f"checking {_demand_key}")
-    solve_using_svr(_demand_w)
-    solve_using_neural_network(_demand_w)
+for demand_key in demand_data:
+    demand_datum = demand_data[demand_key]
+    print(f"checking {demand_key}")
+    solve_using_svr(demand_datum, demand_key, _output_dir="output")
+    solve_using_neural_network(demand_datum, demand_key, _output_dir="output")
