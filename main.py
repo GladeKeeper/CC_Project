@@ -5,17 +5,15 @@ from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from keras import Sequential
-from keras.callbacks import EarlyStopping
-from keras.callbacks import ModelCheckpoint
-from keras.layers import Dense
-from keras.optimizers import Adam
+from tensorflow.keras import Sequential
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.optimizers import Adam
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.svm import SVR
-from tensorflow.python.keras.layers import Dropout
-from tensorflow.python.keras.models import model_from_json, load_model
+from tensorflow.keras.layers import Dense, InputLayer, Dropout
+from tensorflow.keras.models import model_from_json, load_model
 
 warnings.filterwarnings('ignore')
 NUM_SAMPLES = 5
@@ -135,19 +133,12 @@ class DemandPredictorBase(object):
         """
         return mean_squared_error(_y_test, _y_pred)
 
-    def get_mse_avg(self, _y_test, _y_pred):
-        """
-        :param _y_test: actual test values
-        :param _y_pred: predicted test values
-        :return: return the ratio between MSE and average of values
-        """
-        return self.get_mse(_y_test, _y_pred) / np.mean(list(np.transpose(_y_pred)[0]))
-
 
 class DemandPredictorNN(DemandPredictorBase):
-    def __init__(self, _x, _y, train=True, output_dir="."):
+    def __init__(self, _x, _y, train=True, output_dir=".", hidden_layer_conf=None):
         self.input_shape = len(_x[0])
         self.output_shape = len(_y[0])
+        self.hidden_layer_conf = hidden_layer_conf
         self.epochs = 4000
         self.batch_size = 150
         self.verbose = 0
@@ -160,11 +151,19 @@ class DemandPredictorNN(DemandPredictorBase):
         """
             build the model
         """
+
         model = Sequential()
-        model.add(Dense(168, input_shape=(self.input_shape,), activation='relu'))
-        model.add(Dropout(0.1))
-        model.add(Dense(24, activation='relu'))
-        model.add(Dropout(0.01))
+        model.add(InputLayer(input_shape=(self.input_shape,)))
+        if self.hidden_layer_conf is None:
+            model.add(Dense(168, activation='relu'))
+            model.add(Dropout(0.1))
+            model.add(Dense(24, activation='relu'))
+            model.add(Dropout(0.01))
+            model.add(Dense(self.output_shape, activation='linear'))
+            model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
+        else:
+            for layer in self.hidden_layer_conf:
+                model.add(Dense(layer["neurons"], activation=layer["activation"]))
         model.add(Dense(self.output_shape, activation='linear'))
         model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
         return model
@@ -178,7 +177,7 @@ class DemandPredictorNN(DemandPredictorBase):
         """
             train the model
         """
-        es = EarlyStopping(monitor='val_loss', mode='min', verbose=self.verbose, patience=1000)
+        es = EarlyStopping(monitor='val_loss', mode='min', verbose=self.verbose, patience=100)
         mc = ModelCheckpoint(
             self.output_dir + '/best_model.h5', monitor='val_loss', mode='min',
             verbose=self.verbose, save_best_only=True
@@ -247,14 +246,6 @@ class DemandPredictorSVR(DemandPredictorBase):
         """
         self.model.fit(self.x, self.y)
 
-    def get_mse_avg(self, _y_test, _y_pred):
-        """
-        :param _y_test: actual test values
-        :param _y_pred: predicted test values
-        :return: return the ratio between MSE and average of values
-        """
-        return self.get_mse(_y_test, _y_pred) / np.mean(list(np.transpose(_y_pred)))
-
 
 def transform_data(_processed_data):
     columns = list(_processed_data.columns)
@@ -273,47 +264,45 @@ def transform_data(_processed_data):
     return x, y, sc_x, sc_y
 
 
-def solve_using_neural_network(_processed_data, _demand_key, _output_dir):
+def solve_using_neural_network(_processed_data, _demand_key, _output_dir, _hidden_layer_config):
     """
     :param _processed_data: processed_data
     :param _demand_key: demand data type
     :param _output_dir: output directory
+    :param _hidden_layer_config: hidden layer configuration
     :return: run NUM_SAMPLES time neural network and compute the average MSE and MSE ratio
     """
     _x, _y, _, _ = transform_data(_processed_data)
 
     mse = []
-    mse_ratio = []
     time_taken = []
 
     for _i in range(NUM_SAMPLES):
         start = datetime.now()
         x_train, x_test, y_train, y_test = train_test_split(_x, _y, test_size=0.1, random_state=_i)
         tf.random.set_seed(_i)
-        nn = DemandPredictorNN(_x=x_train, _y=y_train, output_dir=_output_dir)
+        nn = DemandPredictorNN(_x=x_train, _y=y_train, output_dir=_output_dir, hidden_layer_conf=_hidden_layer_config)
         y_pred = nn.predict(x_test)
         mse_val = nn.get_mse(y_test, y_pred)
         nn.plot(f"{_output_dir}/demand_type_{_demand_key}_sample_id_{_i}", mse_val)
         mse.append(mse_val)
-        mse_ratio.append(nn.get_mse_avg(y_test, y_pred))
         time_taken.append((datetime.now() - start).total_seconds())
 
     print(f"Average Time Taken: {np.mean(time_taken)} seconds")
     print(f"Average MSE: {np.mean(mse)}, Min MSE: {min(mse)}, Max MSE: {max(mse)}")
-    print(f"Average MSE Ratio: {np.mean(mse_ratio)}, Min MSE Ratio: {min(mse_ratio)}, Max MSE Ratio: {max(mse_ratio)}")
 
 
-def solve_k_fold_neural_network(_processed_data, _demand_key, _output_dir):
+def solve_k_fold_neural_network(_processed_data, _demand_key, _output_dir, _hidden_layer_config):
     """
     :param _processed_data: processed_data
     :param _demand_key: demand data type
     :param _output_dir: output directory
+    :param _hidden_layer_config: hidden layer configuration
     :return: run NUM_SAMPLES time neural network and compute the average MSE and MSE ratio
     """
     _x, _y, _, _ = transform_data(_processed_data)
     _i = 0
     mse = []
-    mse_ratio = []
     time_taken = []
     tf.random.set_seed(_i)
     kf = KFold(n_splits=10, random_state=1, shuffle=True)
@@ -321,17 +310,15 @@ def solve_k_fold_neural_network(_processed_data, _demand_key, _output_dir):
         start = datetime.now()
         x_train, y_train = _x[train_idx], _y[train_idx]
         x_test, y_test = _x[test_idx], _y[test_idx]
-        nn = DemandPredictorNN(_x=x_train, _y=y_train, output_dir=_output_dir)
+        nn = DemandPredictorNN(_x=x_train, _y=y_train, output_dir=_output_dir, hidden_layer_conf=_hidden_layer_config)
         y_pred = nn.predict(x_test)
         mse_val = nn.get_mse(y_test, y_pred)
         nn.plot(f"{_output_dir}/demand_type_{_demand_key}_sample_id_{_k}", mse_val)
         mse.append(mse_val)
-        mse_ratio.append(nn.get_mse_avg(y_test, y_pred))
         time_taken.append((datetime.now() - start).total_seconds())
 
     print(f"Average Time Taken: {np.mean(time_taken)} seconds")
     print(f"Average MSE: {np.mean(mse)}, Min MSE: {min(mse)}, Max MSE: {max(mse)}")
-    print(f"Average MSE Ratio: {np.mean(mse_ratio)}, Min MSE Ratio: {min(mse_ratio)}, Max MSE Ratio: {max(mse_ratio)}")
 
 
 def solve_using_svr(_processed_data, _demand_key, _output_dir):
@@ -344,7 +331,6 @@ def solve_using_svr(_processed_data, _demand_key, _output_dir):
     _x, _y, _, _ = transform_data(_processed_data)
 
     mse = []
-    mse_ratio = []
     time_taken = []
 
     for _i in range(NUM_SAMPLES):
@@ -353,15 +339,38 @@ def solve_using_svr(_processed_data, _demand_key, _output_dir):
         svr = DemandPredictorSVR(x_train, y_train, output_dir=_output_dir)
         y_pred = svr.predict(x_test)
         mse.append(svr.get_mse(y_test, y_pred))
-        mse_ratio.append(svr.get_mse_avg(y_test, y_pred))
         time_taken.append((datetime.now() - start).total_seconds())
 
     print(f"Average Time Taken: {np.mean(time_taken)} seconds")
     print(f"Average MSE: {np.mean(mse)}, Min MSE: {min(mse)}, Max MSE: {max(mse)}")
-    print(f"Average MSE Ratio: {np.mean(mse_ratio)}, Min MSE Ratio: {min(mse_ratio)}, Max MSE Ratio: {max(mse_ratio)}")
 
 
 data, demand, demand_w, demand_h, demand_wh = load_data(_input_dir="data", _data_size=100, _output_dir="output")
+nn_hidden_layer_config = {
+    "base": [
+        {
+            "activation": "relu", "neurons": 64
+        }
+    ],
+    "weekday": [
+        {
+            "activation": "relu", "neurons": 7
+        }
+    ],
+    "hour": [
+        {
+            "activation": "relu", "neurons": 24
+        }
+    ],
+    "weekday_n_hour": [
+        {
+            "activation": "relu", "neurons": 168
+        },
+        {
+            "activation": "relu", "neurons": 24
+        }
+    ]
+}
 demand_data = {
     "base": demand, "weekday": demand_w,
     "hour": demand_h, "weekday_n_hour": demand_wh
@@ -370,4 +379,6 @@ for demand_key in demand_data:
     demand_datum = demand_data[demand_key]
     print(f"checking {demand_key}")
     solve_using_svr(demand_datum, demand_key, _output_dir="output")
-    solve_using_neural_network(demand_datum, demand_key, _output_dir="output")
+    solve_using_neural_network(
+        demand_datum, demand_key, _output_dir="output", _hidden_layer_config=nn_hidden_layer_config[demand_key]
+    )
