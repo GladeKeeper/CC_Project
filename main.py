@@ -341,42 +341,55 @@ def solve_using_svr(_processed_data, _demand_key, _output_dir, _data_size):
     print(f"Average MSE: {np.mean(mse)}, Min MSE: {min(mse)}, Max MSE: {max(mse)}")
 
 
-data_size = 100
-data, demand, demand_w, demand_h, demand_wh = load_data(_input_dir="data", _data_size=data_size, _output_dir="output")
-nn_hidden_layer_config = {
-    "base": [
-        {
-            "activation": "relu", "neurons": 64
-        }
-    ],
-    "weekday": [
-        {
-            "activation": "relu", "neurons": 7
-        }
-    ],
-    "hour": [
-        {
-            "activation": "relu", "neurons": 24
-        }
-    ],
-    "weekday_n_hour": [
-        {
-            "activation": "relu", "neurons": 168
-        },
-        {
-            "activation": "relu", "neurons": 24
-        }
-    ]
-}
-demand_data = {
-    "base": demand, "weekday": demand_w,
-    "hour": demand_h, "weekday_n_hour": demand_wh
-}
-for demand_key in demand_data:
-    demand_datum = demand_data[demand_key]
-    print(f"checking {demand_key}")
-    solve_using_svr(demand_datum, demand_key, _output_dir="output", _data_size=data_size)
-    solve_using_neural_network(
-        demand_datum, demand_key, _output_dir="output",
-        _hidden_layer_config=nn_hidden_layer_config[demand_key], _data_size=data_size
+def main_function(_data_size, _input_dir, _output_dir):
+    """
+    :param _data_size: size of the input data
+    :param _input_dir: input directory
+    :param _output_dir: output directory
+    """
+    data, demand, demand_w, demand_h, demand_wh = load_data(
+        _input_dir=_input_dir, _data_size=_data_size, _output_dir=_output_dir
     )
+    nn_hidden_layer_config = {
+        "base": [
+            {
+                "activation": "relu", "neurons": 64
+            }
+        ],
+        "weekday": [
+            {
+                "activation": "relu", "neurons": 7
+            }
+        ],
+        "hour": [
+            {
+                "activation": "relu", "neurons": 24
+            }
+        ],
+        "weekday_n_hour": [
+            {
+                "activation": "relu", "neurons": 168
+            },
+            {
+                "activation": "relu", "neurons": 24
+            }
+        ]
+    }
+    demand_data = {
+        "base": demand, "weekday": demand_w,
+        "hour": demand_h, "weekday_n_hour": demand_wh
+    }
+    for demand_key in demand_data:
+        demand_datum = demand_data[demand_key]
+        print(f"checking {demand_key}")
+        solve_using_svr(demand_datum, demand_key, _output_dir=_output_dir, _data_size=_data_size)
+        solve_using_neural_network(
+            demand_datum, demand_key, _output_dir=_output_dir,
+            _hidden_layer_config=nn_hidden_layer_config[demand_key], _data_size=_data_size
+        )
+
+
+data_size = 100
+input_dir = "data"
+output_dir = "output"
+main_function(data_size, input_dir, output_dir)
