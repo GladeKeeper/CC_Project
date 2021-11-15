@@ -4,9 +4,6 @@ def initial_process(_input_dir, _output_dir="output"):
                       AWS S3 directory name, where the input files are stored
     :param _output_dir: output directory name
                       AWS S3 directory name, where the output files are saved
-    :param _data_size: size of data
-                      Data size, that needs to be tested, by default it takes value of
-                      -1, which means consider all the data
     :return:
             the processed data, and demand data
     """
